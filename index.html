@@ -87,7 +87,7 @@ async function loadFiles(){
   try{
     setProgress('⏳ Loading files...');
     const r=await vaultFetch('?action=list'); const data=await r.json(); const items=data.files||[];
-    fileList.innerHTML=items.length?items.map(x=>`<div class="file-row"><div class="file-name">📄 ${escapeHtml(x.name)} <small style="color:#888">(${formatBytes(x.size)})</small></div><div class="file-actions"><button class="smallbtn alt" onclick="downloadFile(${JSON.stringify(x.id)},${JSON.stringify(x.name)})">⬇ Download</button><button class="smallbtn" onclick="deleteFile(${JSON.stringify(x.id)},${JSON.stringify(x.name)})">🗑 Delete</button></div></div>`).join(''):'<div style="text-align:center;color:#888;padding:20px">No files uploaded yet.</div>';
+    fileList.innerHTML=items.length?items.map(x=>`<div class="file-row"><div class="file-name">📄 ${escapeHtml(x.name)} <small style="color:#888">(${formatBytes(x.size)})</small></div><div class="file-actions"><button type="button" class="smallbtn alt file-download" data-id="${escapeHtml(x.id)}" data-name="${escapeHtml(x.name)}">⬇ Download</button><button type="button" class="smallbtn file-delete" data-id="${escapeHtml(x.id)}" data-name="${escapeHtml(x.name)}">🗑 Delete</button></div></div>`).join(''):'<div style="text-align:center;color:#888;padding:20px">No files uploaded yet.</div>';
   }catch(e){fileList.innerHTML='<div style="text-align:center;color:#f66;padding:20px">'+escapeHtml(e.message)+'</div>';}
   finally{setProgress('',false)}
 }
@@ -111,6 +111,22 @@ async function deleteFile(id,name){
   try{setProgress('⏳ Deleting...');await vaultFetch('?action=delete&id='+encodeURIComponent(id),{method:'POST'});await loadFiles();}
   catch(e){alert('Delete failed: '+e.message)} finally{setProgress('',false)}
 }
+
+// Use event delegation instead of inline onclick handlers. This prevents
+// quotation marks or special characters in file names/IDs from breaking
+// the generated HTML and works consistently on desktop and mobile.
+fileList.addEventListener('click', async (event)=>{
+  const downloadButton=event.target.closest('.file-download');
+  if(downloadButton){
+    await downloadFile(downloadButton.dataset.id,downloadButton.dataset.name);
+    return;
+  }
+
+  const deleteButton=event.target.closest('.file-delete');
+  if(deleteButton){
+    await deleteFile(deleteButton.dataset.id,deleteButton.dataset.name);
+  }
+});
 function formatBytes(n){if(!n)return '0 B';let u=['B','KB','MB','GB','TB'],i=Math.floor(Math.log(n)/Math.log(1024));return (n/Math.pow(1024,i)).toFixed(i?1:0)+' '+u[i]}
 function escapeHtml(v){return String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
 
