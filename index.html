@@ -94,17 +94,17 @@ async function loadFiles(){
 async function downloadFile(id,name){
   try{
     setProgress('⏳ Preparing '+name+'...');
-    const r=await vaultFetch('?action=download&id='+encodeURIComponent(id));
-    const blob=await r.blob();
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
-    a.href=url;
-    a.download=name;
-    a.style.display='none';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(()=>{a.remove();URL.revokeObjectURL(url)},2000);
-  }catch(e){alert('Download failed: '+e.message)} finally{setProgress('',false)}
+    // Ask the Pages Function for a short-lived download token.
+    // Then navigate normally to the download URL. This works on desktop
+    // and mobile because it does not depend on a delayed popup/blob click.
+    const tokenResponse=await vaultFetch('?action=download-token&id='+encodeURIComponent(id),{method:'POST'});
+    const tokenData=await tokenResponse.json();
+    if(!tokenData.token) throw new Error('Could not create download link');
+    const downloadUrl=VAULT_API+'?action=download&id='+encodeURIComponent(id)+'&token='+encodeURIComponent(tokenData.token);
+    window.location.assign(downloadUrl);
+  }catch(e){
+    alert('Download failed: '+e.message);
+  } finally{setProgress('',false)}
 }
 async function deleteFile(id,name){
   if(!confirm('Delete "'+name+'"?')) return;
