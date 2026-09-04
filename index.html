@@ -95,7 +95,15 @@ async function downloadFile(id,name){
   try{
     setProgress('⏳ Preparing '+name+'...');
     const r=await vaultFetch('?action=download&id='+encodeURIComponent(id));
-    const blob=await r.blob(); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+    const blob=await r.blob();
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;
+    a.download=name;
+    a.style.display='none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(()=>{a.remove();URL.revokeObjectURL(url)},2000);
   }catch(e){alert('Download failed: '+e.message)} finally{setProgress('',false)}
 }
 async function deleteFile(id,name){
