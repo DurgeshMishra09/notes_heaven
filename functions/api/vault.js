@@ -13,6 +13,7 @@ function json(data, status = 200) {
 
 function authorized(request, env) {
   const password = request.headers.get("X-Vault-Password");
+
   return (
     typeof password === "string" &&
     password.length > 0 &&
@@ -37,12 +38,21 @@ function base64urlEncode(bytes) {
 }
 
 function base64urlDecode(value) {
-  const padded =
-    value.replace(/-/g, "+").replace(/_/g, "/") +
-    "===".slice((value.length + 3) % 4);
+  const normalized = value
+    .replace(/-/g, "+")
+    .replace(/_/g, "/");
 
-  const binary = atob(padded);
-  const bytes = new Uint8Array(binary.length);
+  const padding = "=".repeat(
+    (4 - (normalized.length % 4)) % 4
+  );
+
+  const binary = atob(
+    normalized + padding
+  );
+
+  const bytes = new Uint8Array(
+    binary.length
+  );
 
   for (let i = 0; i < binary.length; i++) {
     bytes[i] = binary.charCodeAt(i);
@@ -63,64 +73,93 @@ async function signToken(payload, secret) {
     ["sign"]
   );
 
-  const signature = await crypto.subtle.sign(
-    "HMAC",
-    key,
-    new TextEncoder().encode(payload)
-  );
+  const signature =
+    await crypto.subtle.sign(
+      "HMAC",
+      key,
+      new TextEncoder().encode(payload)
+    );
 
-  return base64urlEncode(new Uint8Array(signature));
+  return base64urlEncode(
+    new Uint8Array(signature)
+  );
 }
 
 async function createToken(id, secret) {
-  const payload = base64urlEncode(
-    new TextEncoder().encode(
-      JSON.stringify({
-        id: id,
-        exp: Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS
-      })
-    )
-  );
+  const payload =
+    base64urlEncode(
+      new TextEncoder().encode(
+        JSON.stringify({
+          id: id,
+          exp:
+            Math.floor(
+              Date.now() / 1000
+            ) + TOKEN_TTL_SECONDS
+        })
+      )
+    );
 
-  const signature = await signToken(payload, secret);
+  const signature =
+    await signToken(
+      payload,
+      secret
+    );
 
   return payload + "." + signature;
 }
 
-async function verifyToken(token, id, secret) {
+async function verifyToken(
+  token,
+  id,
+  secret
+) {
   try {
-    const parts = token.split(".");
+    const parts =
+      token.split(".");
 
     if (parts.length !== 2) {
       return false;
     }
 
-    const payloadText = new TextDecoder().decode(
-      base64urlDecode(parts[0])
-    );
+    const payloadText =
+      new TextDecoder().decode(
+        base64urlDecode(parts[0])
+      );
 
-    const payload = JSON.parse(payloadText);
+    const payload =
+      JSON.parse(payloadText);
 
     if (
       payload.id !== id ||
       !Number.isFinite(payload.exp) ||
-      payload.exp < Math.floor(Date.now() / 1000)
+      payload.exp <
+        Math.floor(
+          Date.now() / 1000
+        )
     ) {
       return false;
     }
 
-    const expected = await signToken(
-      parts[0],
-      secret
-    );
+    const expected =
+      await signToken(
+        parts[0],
+        secret
+      );
 
-    if (expected.length !== parts[1].length) {
+    if (
+      expected.length !==
+      parts[1].length
+    ) {
       return false;
     }
 
     let mismatch = 0;
 
-    for (let i = 0; i < expected.length; i++) {
+    for (
+      let i = 0;
+      i < expected.length;
+      i++
+    ) {
       mismatch |=
         expected.charCodeAt(i) ^
         parts[1].charCodeAt(i);
@@ -133,206 +172,295 @@ async function verifyToken(token, id, secret) {
   }
 }
 
-async function fileExists(env, id) {
-  const result = await env.VAULT_KV.list({
-    prefix: "file:" + id,
-    limit: 1
-  });
+async function fileExists(
+  env,
+  id
+) {
+  const result =
+    await env.VAULT_KV.list({
+      prefix: "file:" + id,
+      limit: 1
+    });
 
-  return result.keys.length > 0;
+  return (
+    result.keys.length > 0
+  );
 }
 
-export async function onRequest(context) {
-  const { request, env } = context;
+export async function onRequest(
+  context
+) {
+  const {
+    request,
+    env
+  } = context;
 
-  const url = new URL(request.url);
-  const action = url.searchParams.get("action");
+  const url =
+    new URL(request.url);
+
+  const action =
+    url.searchParams.get(
+      "action"
+    );
 
   try {
 
     /*
-     * Check that the required Cloudflare
-     * bindings/secrets exist.
+     * Check that the required
+     * KV binding and password
+     * are configured.
      */
-    if (!env.VAULT_KV || !env.VAULT_PASSWORD) {
+
+    if (
+      !env.VAULT_KV ||
+      !env.VAULT_PASSWORD
+    ) {
       return json(
         {
-          error: "Vault is not configured"
+          error:
+            "Vault is not configured"
         },
         500
       );
     }
 
     /*
-     * DOWNLOAD TOKEN
+     * CREATE DOWNLOAD TOKEN
      *
-     * The frontend first asks for a short-lived
-     * token. The password is required here.
+     * The frontend sends the
+     * vault password here.
      */
-    if (action === "download-token") {
+
+    if (
+      action ===
+      "download-token"
+    ) {
 
       if (
-        request.method !== "POST" ||
-        !authorized(request, env)
+        request.method !==
+          "POST" ||
+        !authorized(
+          request,
+          env
+        )
       ) {
         return json(
           {
-            error: "Wrong or missing password"
+            error:
+              "Wrong or missing password"
           },
           401
         );
       }
 
-      const id = url.searchParams.get("id");
+      const id =
+        url.searchParams.get(
+          "id"
+        );
 
       if (!id) {
         return json(
           {
-            error: "Missing file ID"
+            error:
+              "Missing file ID"
           },
           400
         );
       }
 
-      if (!(await fileExists(env, id))) {
+      if (
+        !(await fileExists(
+          env,
+          id
+        ))
+      ) {
         return json(
           {
-            error: "File not found"
+            error:
+              "File not found"
           },
           404
         );
       }
 
-      const token = await createToken(
-        id,
-        env.VAULT_PASSWORD
-      );
-
       return json({
-        token: token
+        token:
+          await createToken(
+            id,
+            env.VAULT_PASSWORD
+          )
       });
     }
 
     /*
-     * ACTUAL DOWNLOAD
+     * DOWNLOAD FILE
      *
-     * The browser can navigate directly to this URL.
-     * This works better on both PC and mobile browsers.
+     * The browser navigates
+     * directly to this URL.
      */
+
     if (
-      action === "download" &&
-      request.method === "GET"
+      action ===
+        "download" &&
+      request.method ===
+        "GET"
     ) {
 
-      const id = url.searchParams.get("id");
-      const token = url.searchParams.get("token");
+      const id =
+        url.searchParams.get(
+          "id"
+        );
+
+      const token =
+        url.searchParams.get(
+          "token"
+        );
 
       if (!id) {
         return json(
           {
-            error: "Missing file ID"
+            error:
+              "Missing file ID"
           },
           400
         );
       }
 
-      const validToken = token
-        ? await verifyToken(
-            token,
-            id,
-            env.VAULT_PASSWORD
-          )
-        : false;
+      const validToken =
+        token
+          ? await verifyToken(
+              token,
+              id,
+              env.VAULT_PASSWORD
+            )
+          : false;
 
       /*
-       * A valid short-lived token is accepted.
-       * Direct password authentication is also
+       * A valid short-lived
+       * token is accepted.
+       *
+       * Direct password
+       * authentication is also
        * accepted for compatibility.
        */
+
       if (
         !validToken &&
-        !authorized(request, env)
+        !authorized(
+          request,
+          env
+        )
       ) {
         return json(
           {
-            error: "Wrong or missing password"
+            error:
+              "Wrong or missing password"
           },
           401
         );
       }
 
-      const key = "file:" + id;
+      const key =
+        "file:" + id;
 
-      const listed = await env.VAULT_KV.list({
-        prefix: key,
-        limit: 1
-      });
+      const listed =
+        await env.VAULT_KV.list({
+          prefix: key,
+          limit: 1
+        });
 
-      if (!listed.keys.length) {
+      if (
+        !listed.keys.length
+      ) {
         return json(
           {
-            error: "File not found"
+            error:
+              "File not found"
           },
           404
         );
       }
 
       const metadata =
-        listed.keys[0].metadata || {};
+        listed.keys[0]
+          .metadata || {};
 
       const data =
         await env.VAULT_KV.get(
           key,
           {
-            type: "arrayBuffer"
+            type:
+              "arrayBuffer"
           }
         );
 
       if (data === null) {
         return json(
           {
-            error: "File not found"
+            error:
+              "File not found"
           },
           404
         );
       }
 
-      const filename = String(
-        metadata.name || "download"
-      )
-        .replace(/[\r\n"]/g, "_")
-        .slice(0, 200);
+      const filename =
+        String(
+          metadata.name ||
+            "download"
+        )
+          .replace(
+            /[\r\n"]/g,
+            "_"
+          )
+          .slice(
+            0,
+            200
+          );
 
       const type =
         metadata.type ||
         "application/octet-stream";
 
-      return new Response(data, {
-        status: 200,
+      return new Response(
+        data,
+        {
+          status: 200,
 
-        headers: {
-          "Content-Type": type,
+          headers: {
+            "Content-Type":
+              type,
 
-          "Content-Disposition":
-            `attachment; filename="download"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+            "Content-Disposition":
+              `attachment; filename="download"; filename*=UTF-8''${encodeURIComponent(filename)}`,
 
-          "Content-Length":
-            String(data.byteLength),
+            "Content-Length":
+              String(
+                data.byteLength
+              ),
 
-          "Cache-Control":
-            "no-store"
+            "Cache-Control":
+              "no-store"
+          }
         }
-      });
+      );
     }
 
     /*
-     * All other vault operations require
-     * the vault password.
+     * All other vault actions
+     * require the password.
      */
-    if (!authorized(request, env)) {
+
+    if (
+      !authorized(
+        request,
+        env
+      )
+    ) {
       return json(
         {
-          error: "Wrong or missing password"
+          error:
+            "Wrong or missing password"
         },
         401
       );
@@ -341,8 +469,10 @@ export async function onRequest(context) {
     /*
      * LIST FILES
      */
+
     if (
-      request.method === "GET" &&
+      request.method ===
+        "GET" &&
       action === "list"
     ) {
 
@@ -352,22 +482,28 @@ export async function onRequest(context) {
         });
 
       const files =
-        result.keys.map(item => ({
-          id: item.name.slice(5),
+        result.keys.map(
+          item => ({
+            id:
+              item.name.slice(
+                5
+              ),
 
-          name:
-            item.metadata?.name ||
-            "Unnamed file",
+            name:
+              item.metadata?.name ||
+              "Unnamed file",
 
-          type:
-            item.metadata?.type ||
-            "application/octet-stream",
+            type:
+              item.metadata?.type ||
+              "application/octet-stream",
 
-          size:
-            Number(
-              item.metadata?.size || 0
-            )
-        }));
+            size:
+              Number(
+                item.metadata?.size ||
+                  0
+              )
+          })
+        );
 
       return json({
         files: files
@@ -377,31 +513,45 @@ export async function onRequest(context) {
     /*
      * UPLOAD FILE
      */
+
     if (
-      request.method === "POST" &&
+      request.method ===
+        "POST" &&
       action === "upload"
     ) {
 
       const name =
-        url.searchParams.get("name") ||
-        "file";
+        url.searchParams.get(
+          "name"
+        ) || "file";
 
       const safeName =
         name
-          .replace(/[\/\\\r\n]/g, "_")
-          .slice(0, 200);
+          .replace(
+            /[\/\\\r\n]/g,
+            "_"
+          )
+          .slice(
+            0,
+            200
+          );
 
       const data =
         await request.arrayBuffer();
 
       /*
-       * Cloudflare KV maximum value size
-       * is 25 MiB.
+       * Cloudflare KV maximum
+       * value size: 25 MiB.
        */
-      if (data.byteLength > MAX_FILE_SIZE) {
+
+      if (
+        data.byteLength >
+        MAX_FILE_SIZE
+      ) {
         return json(
           {
-            error: "File is larger than 25 MB"
+            error:
+              "File is larger than 25 MB"
           },
           413
         );
@@ -418,7 +568,8 @@ export async function onRequest(context) {
         data,
         {
           metadata: {
-            name: safeName,
+            name:
+              safeName,
 
             type:
               request.headers.get(
@@ -434,9 +585,14 @@ export async function onRequest(context) {
 
       return json(
         {
-          success: true,
-          id: id,
-          name: safeName
+          success:
+            true,
+
+          id:
+            id,
+
+          name:
+            safeName
         },
         201
       );
@@ -444,19 +600,32 @@ export async function onRequest(context) {
 
     /*
      * DELETE FILE
+     *
+     * Supports both POST and
+     * DELETE for browser
+     * compatibility.
      */
+
     if (
-      request.method === "DELETE" &&
+      (
+        request.method ===
+          "POST" ||
+        request.method ===
+          "DELETE"
+      ) &&
       action === "delete"
     ) {
 
       const id =
-        url.searchParams.get("id");
+        url.searchParams.get(
+          "id"
+        );
 
       if (!id) {
         return json(
           {
-            error: "Missing file ID"
+            error:
+              "Missing file ID"
           },
           400
         );
@@ -467,16 +636,19 @@ export async function onRequest(context) {
       );
 
       return json({
-        success: true
+        success:
+          true
       });
     }
 
     /*
      * INVALID REQUEST
      */
+
     return json(
       {
-        error: "Invalid request"
+        error:
+          "Invalid request"
       },
       400
     );
@@ -485,7 +657,8 @@ export async function onRequest(context) {
 
     return json(
       {
-        error: "Server error",
+        error:
+          "Server error",
 
         message:
           error instanceof Error
